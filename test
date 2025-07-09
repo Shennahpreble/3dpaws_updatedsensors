@@ -1,0 +1,98 @@
+import smbus2
+import time
+#To save data in correct folder
+import sys
+sys.path.insert(0, '/home/pi/3d_paws/scripts/')
+import helper_functions
+
+#LTR390 I2C address
+LTR390_I2C_ADDR = 0x53
+
+#LTR390 Registers
+LTR390_MAIN_CTRL = 0x00 #Main control register
+LTR390_ALS_UVS_MEAS_RATE = 0x04 #Measurement rate register
+LTR390_ALS_DATA_LSB = 0x0D #UV/ALS data start register
+
+# Control values
+ALS_MODE = 0x00 #ALS mode (Ambient light sensing)
+UV_MODE = 0x02 #UV mode
+
+#Calibration factor (based on calibration procedure)
+CALIBRATION_FACTOR = .014101
+
+# I2C bus (use bus 1 for Raspberry pi)
+bus = smbus2.SMBus(1)
+
+def initialize_sensor():
+    """Initialize the LTR390 Sensor."""
+    try:
+        #Set the sensor to UV mode
+        bus.write_byte_data(LTR390_I2C_ADDR, LTR390_MAIN_CTRL, UV_MODE)
+        print("Set sensor to UV Mode.")
+
+        #Set measurement rate for UV or ALS
+        # Gain = x3, Integration time = 100ms
+        bus.write_byte_data(LTR390_I2C_ADDR, LTR390_ALS_UVS_MEAS_RATE, 0x20)
+        print ("LTR390 sensor initialized in UV mode.")
+        
+        # Confirm sensor
+        main_ctrl = bus.read_byte_data(LTR390_I2C_ADDR, LTR390_MAIN_CTRL)
+        print(f"Main Control Register Value: {hex(main_ctrl)}")
+        if main_ctrl !=UV_MODE:
+            print("Error: Sensor is not in UV Mode!")
+            return False
+        return True
+    
+    except OSError as e:
+        print(f"Error initializing sensor: {e}")
+        return False
+    
+
+def read_uv_data():
+    """Read UV data from LTR390 sensor, applying calibration factor"""
+    try:
+        # Read 3 bytes starting from ALS_DATA_LSB
+        data = bus.read_i2c_block_data(LTR390_I2C_ADDR, LTR390_ALS_DATA_LSB, 3)
+        print(f"Raw data: {data}") # Add this line to print raw data
+
+    #Combine the 3 bytes into a 20-bit UV value
+        uv_data = (data[2] << 16) | (data[1] << 8) | data[0]
+        uv_data = uv_data & 0xFFFFF # Mask to 20 bits
+
+        calibrated_uv_data = uv_data * CALIBRATION_FACTOR
+        
+
+        return uv_data
+    except OSError as e:
+        print(f"Error reading sensor data {e}")
+        return None
+
+def main():
+    """Main function to read and display UV data."""
+    if not initialize_sensor():
+        return #Exit if sensor fails to initialize
+    
+    time.sleep(1) #Allow sensor to stabilize
+   
+
+    try:
+        while True:
+            uv_value = read_uv_data()
+            if uv_value is not None:
+                print(f"UV Sensor Reading: {uv_value}")
+                
+                #To save data in correct folder & format 
+                line = "%.2f" % (uv_value * CALIBRATION_FACTOR)
+                helper_functions.output(False, line, "test_ltr390")
+                
+                time.sleep(5)
+    
+    except KeyboardInterrupt:
+        print("\nExiting...")
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+    finally:
+        bus.close() #Ensure bus is closed properly
+        
+if __name__ == "__main__":
+    main()
