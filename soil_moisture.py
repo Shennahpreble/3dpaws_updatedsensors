@@ -51,7 +51,7 @@ def read_temperature(bus, address):
 try:
     import smbus
     bus = smbus.SMBus(1)
-    address = 0x36
+    address = 0x28
     # Test connection by reading moisture register
     bus.write_byte_data(address, MOISTURE_BASE, MOISTURE_FUNC)
     time.sleep(0.1)
@@ -59,11 +59,11 @@ try:
     sensor_ok = True
 except Exception as e:
     sensor_ok = False
-    print("ERROR: Could not connect to soil moisture sensor at 0x36 - " + str(e))
+    print("ERROR: Could not connect to soil moisture sensor at 0x28 - " + str(e))
     sys.exit(1)
 
 # Run
-print("Soil Moisture Sensor - i2c address 0x36")
+print("Soil Moisture Sensor - i2c address 0x28")
 
 # Check if this is a test and set interval appropriately
 test, samples, iterations = helper_functions.getTest()
