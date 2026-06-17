@@ -1,8 +1,8 @@
 #!/usr/bin/python3
 # Code to read the soil moisture and temperature sensor (Adafruit STEMMA / Qwiic capacitive)
 # Based on 3D-PAWS sensor script style by Joseph Rener, UCAR
-# Sensor: Adafruit STEMMA Soil Sensor (ATSAMD10 based, I2C)
-# Default I2C address: 0x28
+# Sensor: Adafruit STEMMA Soil Sensor (ATSAMD10 based, I2C, Seesaw protocol)
+# Default I2C address: 0x36 (some boards/batches use 0x28 - confirm with i2cdetect)
 # Developed for use with the 3D-PAWS weather station platform
 # COMET / University Corporation for Atmospheric Research (UCAR)
 
@@ -10,7 +10,7 @@ import sys
 sys.path.insert(0, '/home/pi/3d_paws/scripts/')
 import time, helper_functions, datetime, os
 
-# Sensor I2C registers
+# Sensor I2C registers (Seesaw protocol: module base + function byte)
 MOISTURE_BASE   = 0x0F
 MOISTURE_FUNC   = 0x10
 TEMP_BASE       = 0x00
@@ -22,10 +22,13 @@ MOISTURE_MIN = 200    # raw reading in air (dry)
 MOISTURE_MAX = 1800   # raw reading in water (wet)
 
 def read_moisture(bus, address):
-    """Read raw capacitance moisture value from sensor."""
-    bus.write_byte_data(address, MOISTURE_BASE, MOISTURE_FUNC)
-    time.sleep(0.1)
-    data = bus.read_i2c_block_data(address, MOISTURE_BASE, 2)
+    """Read raw capacitance moisture value from sensor (Seesaw protocol)."""
+    # Send the 2-byte command [base, function] together
+    bus.write_i2c_block_data(address, MOISTURE_BASE, [MOISTURE_FUNC])
+    # Seesaw moisture reads need time to settle - longer than the base seesaw delay
+    time.sleep(0.5)
+    # Read raw bytes back (no register byte needed on the read)
+    data = bus.read_i2c_block_data(address, 0, 2)
     moisture_raw = (data[0] << 8) | data[1]
     return moisture_raw
 
@@ -39,10 +42,10 @@ def raw_to_percent(raw):
         return ((raw - MOISTURE_MIN) / (MOISTURE_MAX - MOISTURE_MIN)) * 100.0
 
 def read_temperature(bus, address):
-    """Read soil temperature in Celsius from the sensor's onboard thermistor."""
-    bus.write_byte_data(address, TEMP_BASE, TEMP_FUNC)
-    time.sleep(0.1)
-    data = bus.read_i2c_block_data(address, TEMP_BASE, 4)
+    """Read soil temperature in Celsius from the sensor's onboard thermistor (Seesaw protocol)."""
+    bus.write_i2c_block_data(address, TEMP_BASE, [TEMP_FUNC])
+    time.sleep(0.5)
+    data = bus.read_i2c_block_data(address, 0, 4)
     temp_raw = (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3]
     temp_c = temp_raw / 65536.0
     return temp_c
@@ -53,9 +56,9 @@ try:
     bus = smbus.SMBus(1)
     address = 0x28
     # Test connection by reading moisture register
-    bus.write_byte_data(address, MOISTURE_BASE, MOISTURE_FUNC)
-    time.sleep(0.1)
-    _ = bus.read_i2c_block_data(address, MOISTURE_BASE, 2)
+    bus.write_i2c_block_data(address, MOISTURE_BASE, [MOISTURE_FUNC])
+    time.sleep(0.5)
+    _ = bus.read_i2c_block_data(address, 0, 2)
     sensor_ok = True
 except Exception as e:
     sensor_ok = False
@@ -91,6 +94,9 @@ try:
                 pct  = raw_to_percent(raw)
                 temp = read_temperature(bus, address)
 
+                # Debug print - remove once readings look correct
+                print(f"Sample {x}: raw={raw}, pct={pct:.2f}, temp={temp:.2f}")
+
                 total_moisture_raw += raw
                 total_moisture_pct += pct
                 total_temp         += temp
@@ -101,7 +107,7 @@ try:
             avg_pct  = total_moisture_pct / samples
             avg_temp = total_temp / samples
 
-            # Sanity check — flag bad readings
+            # Sanity check - flag bad readings
             if avg_raw <= 0:
                 avg_raw  = -999.99
                 avg_pct  = -999.99
